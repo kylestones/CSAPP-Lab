@@ -1,0 +1,28 @@
+Border relations with Canada have never been better.
+
+1 2 4 8 16 32
+
+0 207    400f7c
+1 311    400fb9
+2 400f83
+3 0x400f8a
+4 0x400f91
+5 0x400f98
+6 0x400f9f
+7 0x400fa6
+
+
+0 0 DrEvil // 第三个参数解锁 secret_phase
+
+)/.%&'
+9,15,14,5,6,7  --> ascii 后四位是这些值的
+输入数组 maduiersnfotvbyl 的索引，得到 flyers
+
+
+4 3 2 1 6 5
+22
+二叉树查找，顺序是先左后右
+                                           n1(0x24)
+                     n21(0x8)                                     n22(0x32)
+             n31(0x6)       n32(*0x16*)                 n33(0x2d)          n34(0x6b)
+     n41(0x1)  n42(0x7)  n43(0x1)  n44(0x23)     n45(0x28) n46(0x2f)  n47(0x63) n48(0x3e9)

@@ -1,3 +1,24 @@
+#define BUFFER_SIZE 0x28
+unsigned getbuf ()
+{
+    char buf[BUFFER_SIZE];
+    Gets(buf);
+    return 1;
+}
+
+void test ()
+{
+    int val;
+    val = getbuf();
+    printf("No exploit. Getbuf returned 0x%x\n", val);
+}
+
+// 调用 getbuf 会将下一条地址压栈，
+// 同时 getbuf 会减小栈指针 %rsp ，用于保存 buf ；
+// 栈上保存的内存超过 buf 定义的大小就会越界，
+// 从而覆盖 retq 的地址
+
+
 /* This function marks the start of the farm */
 int start_farm()
 {
