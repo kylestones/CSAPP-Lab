@@ -1,9 +1,10 @@
 
-+ [X] bomb 
-+ [X] attack 
-+ [ ] malloc-free 
-+ [ ] shell
-+ [ ] cachelab
-+ [ ] perflab
-+ [ ] proxylab
-+ [ ] archlab
+实验列表 [25%]
+- [X] bomb 
+- [X] attack 
+- [ ] malloc-free 
+- [ ] shell
+- [ ] cachelab
+- [ ] perflab
+- [ ] proxylab
+- [ ] archlab
