@@ -1,10 +1,17 @@
 
-实验列表 [25%]
+实验列表 [37%]
 - [X] bomb 
 - [X] attack 
-- [ ] malloc-free 
+- [X] malloc-free 
 - [ ] shell
 - [ ] cachelab
 - [ ] perflab
 - [ ] proxylab
 - [ ] archlab
+
+
+书上指定的网站，但是学生版的好像没有更新
+[[http://csapp.cs.cmu.edu/][CS:APP3e]]
+
+之前的都是 2001 的实验，这里是 2010 年的，但是距离现在也有十年了，不清楚还有没有更新的
+[[https://www.cs.cmu.edu/afs/cs/academic/class/15213-f10/www/labs/][2010-LABS]]

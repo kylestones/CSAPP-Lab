@@ -1,15 +1,34 @@
 /*
- * mm-naive.c - The fastest, least memory-efficient malloc package.
+ * 文档中给出的编码格式要求
+ * 1. Your code should be decomposed into functions and use as few global variables as possible. You
+ * should use macros or inline functions to isolate pointer arithmetic to as few places as possible.
  *
- * In this naive approach, a block is allocated by simply incrementing
- * the brk pointer.  Blocks are never coalesced or reused.  The size of
- * a block is found at the first aligned word before the block (we need
- * it for realloc).
+ * 1. Your code must begin with a header comment that gives an overview of the structure of your free and
+ * allocated blocks, the organization of the free list, and how your allocator manipulates the free list.
  *
- * This code is correct and blazingly fast, but very bad usage-wise since
- * it never frees anything.
- * 20201006 -- 开始调试
+ * 1. In addition to this overview header comment, each function should be preceded by a header comment
+ * that describes what the function does.
+ *
+ * 整体设计：
+ * 1. 每个 block 至少为 4 个指针大小，hdrp - pred - succ - ftrp ，依次为 头指针、前驱指针、后继指针、脚指针
+ * 1. 分离空闲链表，有 9 个入口 {32}, {33-64}, {65-128}, {129-512}, {513-1024}, {1025-2048}, {2049-4096}, {4097-INC}
+ * 1. 每个空闲链表入口包含两个指针，pred 和 succ ，用于消除头部的特殊处理
+ * 1. 空闲链表的入口保存在堆的起始位置，使用一个全局变量保存首地址，供占据 2 * 9 * SIZE_T_SIZE 大小
+ * 1. 为了保持 32 位兼容，堆空间上，空闲链表入口地址只有仍然保留一个 SIZE_T_SIZE 大小的对齐空间
+ *
+ * 编码：
+ * 1. 拆分了一些函数
+ * 1. 使用了两个全局变量，一个保存空闲链表的入口地址，另一个保存序言块的起始地址（这个好像也不太需要。。）
+ * 1. 设计到指针的特殊处理，基本都使用了宏定义
+ * 1. 函数头，对函数的主意事项进行了必要的描述
+ *
+ * 活动：
+ * 20201001 -- 阅读 csapp
+ * 20201003 -- 开始书写
+ * 20201005 -- 功能函数基本完成
+ * 20201006 -- 开始调试，，增加了堆的检查函数，居然检查函数写错了好几个地方，后来发现最小块大小有问题，24 的时候，在空闲链表上无法正常保存，晚上可以跑通，但是分数很低
  */
+
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -74,6 +93,7 @@
 #define NEXT_BLKP(bp)  ((char *)(bp) + GET_SIZE(HDRP(bp)))
 
 /*
+ * 定义空闲链表的前驱和后继的时候，发现有点迷茫
  * something about pointer:
  * 1. 普通变量，有变量名、类型、值
  * 1. 变量名--对应该变量的地址，类型--数据的类型，值--实际数据
@@ -83,19 +103,18 @@
  * 1. 变量名--同样也是内存中某个地址，类型--某种类型指针的指针，值--指向某种类型数据指针的地址
  * 1. 不管什么类型的指针， * 操作都是得到该指针指向的值
  */
-
 /* Given free block ptr bp, compute address of its preceding free block and succeeding block */
 #define PRED_BLKP(bp)  (*(char **)(bp))
 #define SUCC_BLKP(bp)  (*(char **)((char *)(bp) + SIZE_T_SIZE))
 
 
 /*
-  64 位系统，hdr + ftr + align(data) = 8 + 8 + 8 = 24
+  64 位系统，hdr + ftr + pred + succ = 8+ 8 + 8 + 8 = 32
     16 - 32
     33 - 64
     65 - 128
    129 - 256
-   257 - 512 
+   257 - 512
    513 - 1024
   1025 - 2048
   2049 - 4096
@@ -116,14 +135,12 @@ static char   *heap_listp            = NULL;
 /* 内部函数声明 */
 static void *extend_heap(size_t bytes);
 static void *coalesce(void *bp);
-
+static void *find_fit(size_t size);
+static void place(void *bp, size_t asize);
 static size_t *find_entry_in_segregated_list(size_t size);
 static int insert_to_segregated_list(void *bp);
 static int delete_from_segregated_list(void *bp);
-static void *find_fit(size_t size);
-static void place(void *bp, size_t asize);
-
-
+static void mm_print_heap();
 
 /*
  * mm_init - Called when a new trace starts.
@@ -135,7 +152,6 @@ static void place(void *bp, size_t asize);
  */
 int mm_init(void)
 {
-    // 无论是 32 还是 64 位都不再需要前面预留的那个块了，因为前面是 9 个，都可以对齐 -- 不再试用
     // 2 * 9 ，前面是偶数个，32 位的时候，仍然需要保留一个 SIZE_T_SIZE 对齐
     heap_listp = (char *)mem_sbrk((SEGREGATED_FREE_LIST_ENTRY_SIZE + 4) * SIZE_T_SIZE);
     if ((void *)heap_listp == (void *)MEM_ERROR)
@@ -241,6 +257,7 @@ void free(void *ptr){
  * realloc - Change the size of the block by mallocing a new block,
  *      copying its data, and freeing the old block.  I'm too lazy
  *      to do better.
+ * TODO - 暂未处理
  */
 void *realloc(void *oldptr, size_t size)
 {
@@ -288,163 +305,6 @@ void *calloc (size_t nmemb, size_t size)
   memset(newptr, 0, bytes);
 
   return newptr;
-}
-
-/*
- * mm_checkheap - 检查 heap 和 free list
- *
- * checking the heap -- 通过 header footer 检查
- * 1. 检查 epilogue 和 prologue
- * 1. 检查 block's address alignment
- * 1. 检查堆的边界
- * 1. 检查 header 和 footer 是否匹配，是否存在连续的 free block
- *
- * checking the free list -- 通过 pred 和 succ
- * 1. pred/succ 是连续的， A's next is B, then B's pred must be A
- * 1. 所有的空闲链表都在 mem_heap_lo() 和 mem_heap_hight() 之间
- * 1. 通过 header footer 计算 free block 的个数，等于通过 pred succ 得到的个数
- * 1. 分离空闲链表中，各个 free block size 在该链表的范围之内
- */
-void mm_checkheap(int verbose)
-{
-    verbose = verbose;
-    dbg_printf("call by line-%d\n", verbose);
-
-    /* checking the heap */
-
-    /*
-     * 检查 block's address alignment
-     * 检查 header 和 footer 是否匹配
-     * 检查是否存在连续的 free block
-     */
-    // 从序言块后一个节点开始往后遍历
-    char *bp = NEXT_BLKP(heap_listp);
-    size_t is_pre_alloc = 1;
-    size_t free_block_num = 0;
-    // 只有结尾块的 size 是 0
-    while (GET_SIZE(HDRP(bp)))
-    {
-        // 检查地址对齐
-        if (((size_t)bp % ALIGNMENT) != 0)
-        {
-            dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-            exit(127);
-        }
-
-        // 检查 header 和 footer 是否匹配
-        if (GET(HDRP(bp)) != GET(FTRP(bp)))
-        {
-            dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-            exit(127);
-        }
-
-        // 前面块和当前块都是 free 的
-        if (!is_pre_alloc && !GET_ALLOC(HDRP(bp)))
-        {
-            dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-            exit(127);
-        }
-
-        is_pre_alloc = GET_ALLOC(HDRP(bp));
-        if (!is_pre_alloc)
-        {
-            free_block_num++;
-        }
-
-        bp = NEXT_BLKP(bp);
-    }
-
-    //检查 epilogue 和 prologue
-    // 退出 while 循环后 bp 指向了结尾块
-    if (GET(HDRP(bp)) != 0x1)
-    {
-        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-        exit(127);
-    }
-
-#define PROLOGUE_SIZE (2 * SIZE_T_SIZE)
-    if (GET(HDRP(heap_listp)) != PACK(PROLOGUE_SIZE, 0x1))
-    {
-        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-        exit(127);
-    }
-    if (GET(FTRP(heap_listp)) != PACK(PROLOGUE_SIZE, 0x1))
-    {
-        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-        exit(127);
-    }
-
-    //检查堆的边界
-    if (heap_listp < (char *)mem_heap_lo())
-    {
-        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-        exit(127);
-    }
-
-    // 不清楚为什么 mem_heap_hi() 的实现减去了 1
-    if (bp > (char *)mem_heap_hi() + 1)
-    {
-        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-        exit(127);
-    }
-
-    /* checking the free list */
-    // pred/succ 是连续的， A's next is B, then B's pred must be A
-    // 分离空闲链表中，各个 free block size 在该链表的范围之内
-    size_t *entry_listp = segregated_free_listp;
-    // 外循环遍历分离空闲链表的所有入口
-    while (entry_listp < segregated_free_listp + SEGREGATED_FREE_LIST_ENTRY_SIZE)
-    {
-        // 内循环遍历单个空闲链表
-        char *pred = (char *)entry_listp;
-        char *succ = SUCC_BLKP(pred);
-        while (succ != NULL)
-        {
-            size_t size = GET_SIZE(HDRP(succ));
-            if (find_entry_in_segregated_list(size) != entry_listp)
-            {
-                dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-                exit(127);
-            }
-
-            if (PRED_BLKP(succ) != pred)
-            {
-                dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-                exit(127);
-            }
-
-            // 空闲链表中不应该出现已分配 block
-            if (GET_ALLOC(HDRP(succ)))
-            {
-                dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-                exit(127);
-            }
-            else
-            {
-                free_block_num--;
-            }
-
-            // 所有的空闲链表都在 mem_heap_lo() 和 mem_heap_hi() 之间
-            if (succ < (char *)mem_heap_lo() || succ > (char *)mem_heap_hi())
-            {
-                dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-                exit(127);
-            }
-
-            // 开始下一个节点的检查
-            pred = succ;
-            succ = SUCC_BLKP(succ);
-        }
-
-        entry_listp += SEGREGATED_FREE_LIST_ENTRY_STEP;
-    }
-
-    // 通过 header footer 计算 free block 的个数，等于通过 pred succ 得到的个数
-    if (free_block_num != 0)
-    {
-        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
-        exit(127);
-    }
 }
 
 /*
@@ -809,7 +669,7 @@ static void place(void *bp, size_t asize)
 }
 
 
-void mm_print_heap()
+static void mm_print_heap()
 {
     // 从序言块后一个节点开始往后遍历
     char *bp = heap_listp;
@@ -846,5 +706,162 @@ void mm_print_heap()
         }
 
         entry_listp += SEGREGATED_FREE_LIST_ENTRY_STEP;
+    }
+}
+
+/*
+ * mm_checkheap - 检查 heap 和 free list
+ *
+ * checking the heap -- 通过 header footer 检查
+ * 1. 检查 epilogue 和 prologue
+ * 1. 检查 block's address alignment
+ * 1. 检查堆的边界
+ * 1. 检查 header 和 footer 是否匹配，是否存在连续的 free block
+ *
+ * checking the free list -- 通过 pred 和 succ
+ * 1. pred/succ 是连续的， A's next is B, then B's pred must be A
+ * 1. 所有的空闲链表都在 mem_heap_lo() 和 mem_heap_hight() 之间
+ * 1. 通过 header footer 计算 free block 的个数，等于通过 pred succ 得到的个数
+ * 1. 分离空闲链表中，各个 free block size 在该链表的范围之内
+ */
+void mm_checkheap(int verbose)
+{
+    verbose = verbose;
+    dbg_printf("call by line-%d\n", verbose);
+
+    /* checking the heap */
+
+    /*
+     * 检查 block's address alignment
+     * 检查 header 和 footer 是否匹配
+     * 检查是否存在连续的 free block
+     */
+    // 从序言块后一个节点开始往后遍历
+    char *bp = NEXT_BLKP(heap_listp);
+    size_t is_pre_alloc = 1;
+    size_t free_block_num = 0;
+    // 只有结尾块的 size 是 0
+    while (GET_SIZE(HDRP(bp)))
+    {
+        // 检查地址对齐
+        if (((size_t)bp % ALIGNMENT) != 0)
+        {
+            dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+            exit(127);
+        }
+
+        // 检查 header 和 footer 是否匹配
+        if (GET(HDRP(bp)) != GET(FTRP(bp)))
+        {
+            dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+            exit(127);
+        }
+
+        // 前面块和当前块都是 free 的
+        if (!is_pre_alloc && !GET_ALLOC(HDRP(bp)))
+        {
+            dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+            exit(127);
+        }
+
+        is_pre_alloc = GET_ALLOC(HDRP(bp));
+        if (!is_pre_alloc)
+        {
+            free_block_num++;
+        }
+
+        bp = NEXT_BLKP(bp);
+    }
+
+    //检查 epilogue 和 prologue
+    // 退出 while 循环后 bp 指向了结尾块
+    if (GET(HDRP(bp)) != 0x1)
+    {
+        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+        exit(127);
+    }
+
+#define PROLOGUE_SIZE (2 * SIZE_T_SIZE)
+    if (GET(HDRP(heap_listp)) != PACK(PROLOGUE_SIZE, 0x1))
+    {
+        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+        exit(127);
+    }
+    if (GET(FTRP(heap_listp)) != PACK(PROLOGUE_SIZE, 0x1))
+    {
+        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+        exit(127);
+    }
+
+    //检查堆的边界
+    if (heap_listp < (char *)mem_heap_lo())
+    {
+        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+        exit(127);
+    }
+
+    // 不清楚为什么 mem_heap_hi() 的实现减去了 1
+    if (bp > (char *)mem_heap_hi() + 1)
+    {
+        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+        exit(127);
+    }
+
+    /* checking the free list */
+    // pred/succ 是连续的， A's next is B, then B's pred must be A
+    // 分离空闲链表中，各个 free block size 在该链表的范围之内
+    size_t *entry_listp = segregated_free_listp;
+    // 外循环遍历分离空闲链表的所有入口
+    while (entry_listp < segregated_free_listp + SEGREGATED_FREE_LIST_ENTRY_SIZE)
+    {
+        // 内循环遍历单个空闲链表
+        char *pred = (char *)entry_listp;
+        char *succ = SUCC_BLKP(pred);
+        while (succ != NULL)
+        {
+            size_t size = GET_SIZE(HDRP(succ));
+            if (find_entry_in_segregated_list(size) != entry_listp)
+            {
+                dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+                exit(127);
+            }
+
+            if (PRED_BLKP(succ) != pred)
+            {
+                dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+                exit(127);
+            }
+
+            // 空闲链表中不应该出现已分配 block
+            if (GET_ALLOC(HDRP(succ)))
+            {
+                dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+                exit(127);
+            }
+            else
+            {
+                free_block_num--;
+            }
+
+            // 所有的空闲链表都在 mem_heap_lo() 和 mem_heap_hi() 之间
+            if (succ < (char *)mem_heap_lo() || succ > (char *)mem_heap_hi())
+            {
+                dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+                exit(127);
+            }
+
+            // 开始下一个节点的检查
+            pred = succ;
+            succ = SUCC_BLKP(succ);
+        }
+
+        entry_listp += SEGREGATED_FREE_LIST_ENTRY_STEP;
+    }
+
+    // 通过 header footer 计算 free block 的个数，等于通过 pred succ 得到的个数
+    if (free_block_num != 0)
+    {
+        dbg_printf("%s-%s-%d\n", __FILE__, __func__, __LINE__);
+        exit(127);
     }
 }

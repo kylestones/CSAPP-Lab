@@ -194,7 +194,8 @@ int submitr(char *hostname,	/* Server domain name */
 	size_t req_size;		 /* HTTP request size in bytes */
 	rio_t rio;			   /* Handle for buffered RIO functions */
 
-	char buf[SUBMITR_MAXBUF];		/* Buffer for HTTP requests/responses */ 
+    // 编译错误，增大了 buf 的空间
+	char buf[SUBMITR_MAXBUF+73];		/* Buffer for HTTP requests/responses */ 
 	char enc_result[SUBMITR_MAXBUF]; /* Buffer for URL-encoded result string */
 
 	char version[SUBMITR_MAXBUF];	/* Fields from first response line */

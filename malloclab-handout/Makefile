@@ -2,8 +2,9 @@
 # Makefile for the malloc lab driver
 #
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -O2 -g -DDRIVER
-#CFLAGS = -Wall -Wextra -Werror -ggdb3 -DDRIVER
+CFLAGS = -Wall -Wextra -O2 -DDRIVER
+# 原来代码有变异告警，需要先注释掉，编译一遍，然后再放开，保证 mm.c 中没有告警
+#CFLAGS = -Werror -ggdb3
 
 OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o driverlib.o
 
