@@ -8,7 +8,7 @@ TSH = ./tsh
 TSHREF = ./tshref
 TSHARGS = "-p"
 CC = gcc
-CFLAGS = -Wall -g
+CFLAGS = -Wall -ggdb3
 FILES = $(TSH) ./myspin ./mysplit ./mystop ./myint
 
 all: $(FILES)

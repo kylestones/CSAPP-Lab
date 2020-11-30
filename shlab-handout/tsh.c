@@ -189,16 +189,12 @@ void eval(char *cmdline)
 
         sigfillset(&mask_all);
         sigemptyset(&mask_chld);
+        sigemptyset(&mask_prev);
         sigaddset(&mask_chld, SIGCHLD);
 
         sigprocmask(SIG_BLOCK, &mask_chld, &mask_prev);
-        pid = fork();
-        if (pid < 0)
-        {
-            printf("fork error: %s\n", strerror(errno));
-            exit(0);
-        }
-
+        //sigprocmask(SIG_BLOCK, &mask_all, &mask_prev);
+        pid = fork(); // 默认不会失败，减少错误分支
         // 子进程
         if (pid == 0)
         {
@@ -206,7 +202,7 @@ void eval(char *cmdline)
             setpgid(0 , 0);
             // 设置新的进程组之后再恢复之前的信号
             sigprocmask(SIG_SETMASK, &mask_prev, NULL);
-            //printf("argv[0] %s \n", argv[0]);
+            //printf("child process: argv[0] %s \n", argv[0]);
             // execve 会将信号处理函数恢复位默认动作
             if (execve(argv[0], argv, environ) < 0)
             {
@@ -224,7 +220,7 @@ void eval(char *cmdline)
         if (bg)
         {
             // 打印子进程 jid pid
-            printf("[%d] (%d) %s\n", pid2jid(pid), pid, cmdline);
+            printf("[%d] (%d) %s", pid2jid(pid), pid, cmdline);
         }
         else
         {
@@ -352,11 +348,11 @@ void do_bgfg(char **argv)
         state = FG;
     }
 
-    if (sscanf("%%d", argv[1], &jid))
+    if (sscanf(argv[1], "%%%d", &jid))
     {
         pjob = getjobjid(jobs, jid);
     }
-    else if (sscanf("%d", argv[1], &pid))
+    else if (sscanf(argv[1], "%d", &pid))
     {
         pjob = getjobpid(jobs, pid);
     }
@@ -370,7 +366,7 @@ void do_bgfg(char **argv)
 
     pjob->state = state;
 
-    kill(pjob->pid, SIGCONT);
+    kill(-pjob->pid, SIGCONT);
 
     return;
 }
@@ -383,13 +379,11 @@ void waitfg(pid_t pid)
 {
     struct job_t *pjob = NULL;
 
-    printf("out watifd %d\n", pid);
     pjob = getjobpid(jobs, pid);
     if (pjob)
     {
         while (pjob->state == FG)
         {
-            //printf("inner watifd %d\n", pid);
             sleep(0);
         }
     }
@@ -418,10 +412,8 @@ void sigchld_handler(int sig)
 
     sigfillset(&mask_all);
 
-    printf("%s", __func__);
-    while ((pid = waitpid(0, &status, WNOHANG | WUNTRACED)) > 0)
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0)
     {
-        printf("waitpid is %d\n", pid);
         if (WIFEXITED(status))
         {
             sigprocmask(SIG_BLOCK, &mask_all, &mask_prev);
@@ -437,6 +429,7 @@ void sigchld_handler(int sig)
         }
         else if (WIFSTOPPED(status))
         {
+            printf("Job [%d] (%d) stoped by signal %d\n", pid2jid(pid), pid, WTERMSIG(status));
             sigprocmask(SIG_BLOCK, &mask_all, &mask_prev);
             pjob = getjobpid(jobs, pid);
             pjob->state = ST;
